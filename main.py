@@ -61,6 +61,10 @@ def create_sample_config(output_path='config.ini'):
         '# Stereo calibration criteria': '',
         'stereo_max_iter': '100',
         'stereo_epsilon': '1e-5',
+        '# Stereo calibration flags (for divergent cameras with minimal overlap)': '',
+        'stereo_fix_intrinsic': 'true',
+        'stereo_fix_focal_length': 'true',
+        'stereo_fix_principal_point': 'true',
         '# Output format': '',
         'output_format': 'npz',
         '# Performance': '',
@@ -73,6 +77,7 @@ def create_sample_config(output_path='config.ini'):
         'right_images': 'images/right',
         'stereo_images': 'images/stereo',
         'saves_folder': 'images/saves',
+        'calibration_output': 'calibration',
         '# Calibration output files': '',
         'left_calibration': 'left.npz',
         'right_calibration': 'right.npz',
@@ -108,7 +113,8 @@ def create_folder_structure(config_path='config.ini'):
         config.get('paths', 'left_images'),
         config.get('paths', 'right_images'),
         config.get('paths', 'stereo_images'),
-        config.get('paths', 'saves_folder')
+        config.get('paths', 'saves_folder'),
+        config.get('paths', 'calibration_output')
     ]
     
     for folder in folders:
@@ -210,7 +216,8 @@ if __name__ == "__main__":
     parser.add_argument('-a', '--action', type=str,
                         choices=['capture-left', 'capture-right', 'capture-stereo', 
                                 'calibrate-left', 'calibrate-right', 'stereo-calibrate', 
-                                'preview', 'create-config', 'setup-folders', 'convert-calibration'],
+                                'preview', 'create-config', 'setup-folders', 'convert-calibration',
+                                'visualize-overlap'],
                         help='Action to perform')
     parser.add_argument('-f', '--fisheye', action='store_true',
                         help='Use fisheye calibration model')
@@ -218,6 +225,12 @@ if __name__ == "__main__":
                         help='Calibration output format (overrides config file)')
     parser.add_argument('--input-file', type=str,
                         help='Input calibration file for conversion (.npz or .yaml)')
+    parser.add_argument('--left-image', type=str,
+                        help='Left camera image for overlap visualization')
+    parser.add_argument('--right-image', type=str,
+                        help='Right camera image for overlap visualization')
+    parser.add_argument('--stereo-calib', type=str,
+                        help='Stereo calibration file for overlap visualization')
     parser.add_argument('--max-images', type=int,
                         help='Maximum number of images to use for calibration (default: 30)')
     
@@ -312,5 +325,10 @@ if __name__ == "__main__":
         calibrate.calibrate('right', fisheye=use_fisheye, save_format=save_format, max_images=max_images)
     elif args.action == 'stereo-calibrate':
         calibrate.stereo_calibrate(save_format=save_format)
+    elif args.action == 'visualize-overlap':
+        if not args.left_image or not args.right_image or not args.stereo_calib:
+            print("Error: --left-image, --right-image, and --stereo-calib are required for visualize-overlap")
+            exit(1)
+        calibrate.visualize_stereo_overlap(args.left_image, args.right_image, args.stereo_calib)
     elif args.action == 'preview':
         calibrate.preview_stereo()

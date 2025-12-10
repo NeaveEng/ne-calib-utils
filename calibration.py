@@ -67,9 +67,15 @@ class Calibration:
         instance.image_folders['left'] = config.get('paths', 'left_images')
         instance.image_folders['right'] = config.get('paths', 'right_images')
         instance.image_folders['stereo'] = config.get('paths', 'stereo_images')
+        instance.image_folders['calibration'] = config.get('paths', 'calibration_output')
         
         # Set rectification alpha
         instance.rectification_alpha = config.getfloat('calibration', 'rectification_alpha')
+        
+        # Set stereo calibration flags
+        instance.stereo_fix_intrinsic = config.getboolean('calibration', 'stereo_fix_intrinsic')
+        instance.stereo_fix_focal_length = config.getboolean('calibration', 'stereo_fix_focal_length')
+        instance.stereo_fix_principal_point = config.getboolean('calibration', 'stereo_fix_principal_point')
         
         # Set marker color
         instance.marker_detector.marker_colour = (
@@ -90,13 +96,20 @@ class Calibration:
             data: Dictionary containing calibration data
             save_format: Format to save - 'npz', 'yaml', or 'both'
         """
+        # Ensure calibration output folder exists
+        calib_folder = self.image_folders.get('calibration', 'calibration')
+        os.makedirs(calib_folder, exist_ok=True)
+        
+        # Create full path
+        filepath = os.path.join(calib_folder, name)
+        
         if save_format in ('npz', 'both'):
-            np.savez(f"{name}.npz", **data)
-            print(f"Saved {name}.npz")
+            np.savez(f"{filepath}.npz", **data)
+            print(f"Saved {filepath}.npz")
         
         if save_format in ('yaml', 'both'):
             # Use OpenCV's FileStorage for YAML output
-            fs = cv2.FileStorage(f"{name}.yaml", cv2.FILE_STORAGE_WRITE)
+            fs = cv2.FileStorage(f"{filepath}.yaml", cv2.FILE_STORAGE_WRITE)
             
             for key, value in data.items():
                 if isinstance(value, np.ndarray):
@@ -113,7 +126,7 @@ class Calibration:
                     fs.write(key, value)
             
             fs.release()
-            print(f"Saved {name}.yaml")        
+            print(f"Saved {filepath}.yaml")        
     def create_image_folders(self):
         """Create image folders for storing calibration images."""
         for folder in self.image_folders.values():
@@ -731,14 +744,32 @@ class Calibration:
         print(f"Calibration complete for {camera_name}, error: {retval}")
         
   
-    def stereo_calibrate(self, save_format='npz'):
+    def stereo_calibrate(self, save_format='npz', use_config_flags=True):
         """
         Perform stereo calibration using matched image pairs.
         
         Args:
-            save_format: Format to save calibration - 'npz', 'json', or 'both'
+            save_format: Format to save calibration - 'npz', 'yaml', or 'both'
+            use_config_flags: Whether to use stereo calibration flags from config (default: True)
         """
-        """Perform stereo calibration using captured stereo image pairs."""
+        # Load individual camera calibrations first
+        print("Loading individual camera calibrations...")
+        if self.left_calibration is None or self.right_calibration is None:
+            self.load_calibrations()
+        
+        if self.left_calibration is None:
+            print("Error: Left camera calibration not found. Please run 'calibrate-left' first.")
+            return
+        
+        if self.right_calibration is None:
+            print("Error: Right camera calibration not found. Please run 'calibrate-right' first.")
+            return
+        
+        print("Left camera calibration loaded successfully")
+        print(f"  Keys: {list(self.left_calibration.keys())}")
+        print("Right camera calibration loaded successfully")
+        print(f"  Keys: {list(self.right_calibration.keys())}")
+        
         stereo_image_folder = self.image_folders["stereo"]
         left_images = []
         right_images = []
@@ -811,6 +842,29 @@ class Calibration:
 
         # Now use matched corners to perform stereo calibration
         if len(matched_corners_left) and len(matched_corners_right):
+            print(f"\nPerforming stereo calibration with {len(matched_corners_left)} matched pairs...")
+            
+            # Build stereo calibration flags
+            stereo_flags = 0
+            
+            if use_config_flags and hasattr(self, 'stereo_fix_intrinsic') and self.stereo_fix_intrinsic:
+                stereo_flags |= cv2.CALIB_FIX_INTRINSIC
+            if use_config_flags and hasattr(self, 'stereo_fix_focal_length') and self.stereo_fix_focal_length:
+                stereo_flags |= cv2.CALIB_FIX_FOCAL_LENGTH
+            if use_config_flags and hasattr(self, 'stereo_fix_principal_point') and self.stereo_fix_principal_point:
+                stereo_flags |= cv2.CALIB_FIX_PRINCIPAL_POINT
+            
+            if stereo_flags == 0:
+                print("Using default stereo calibration (no flags)")
+            else:
+                print("Using stereo calibration flags:")
+                if stereo_flags & cv2.CALIB_FIX_INTRINSIC:
+                    print("  - CALIB_FIX_INTRINSIC: Trusting individual camera calibrations")
+                if stereo_flags & cv2.CALIB_FIX_FOCAL_LENGTH:
+                    print("  - CALIB_FIX_FOCAL_LENGTH: Preserving focal lengths")
+                if stereo_flags & cv2.CALIB_FIX_PRINCIPAL_POINT:
+                    print("  - CALIB_FIX_PRINCIPAL_POINT: Preserving principal points")
+            
             ret, camera_matrix_left, dist_coeffs_left, camera_matrix_right, dist_coeffs_right, R, T, E, F = cv2.stereoCalibrate(
                 objectPoints=matched_object_points,
                 imagePoints1=matched_corners_left,
@@ -822,7 +876,7 @@ class Calibration:
                 imageSize=left_gray.shape[::-1],
                 criteria=(cv2.TERM_CRITERIA_EPS +
                         cv2.TERM_CRITERIA_MAX_ITER, 100, 1e-5),
-                flags=0
+                flags=stereo_flags
             )
             print("Stereo Calibration Reprojection Error:\n", ret)
             print("camera matrix left:\n", camera_matrix_left)
@@ -850,8 +904,594 @@ class Calibration:
             'E': E,
             'F': F
         }
+        
+        # Compute rectification for divergent cameras
+        print("\nComputing stereo rectification for divergent cameras...")
+        R1, R2, P1, P2, Q, roi_left, roi_right = cv2.stereoRectify(
+            camera_matrix_left, dist_coeffs_left,
+            camera_matrix_right, dist_coeffs_right,
+            (left_gray.shape[1], left_gray.shape[0]),
+            R, T,
+            alpha=self.rectification_alpha,
+            flags=cv2.CALIB_ZERO_DISPARITY
+        )
+        
+        # Compute rectification maps
+        map1_left, map2_left = cv2.initUndistortRectifyMap(
+            camera_matrix_left, dist_coeffs_left, R1, P1,
+            (left_gray.shape[1], left_gray.shape[0]), cv2.CV_32FC1)
+        map1_right, map2_right = cv2.initUndistortRectifyMap(
+            camera_matrix_right, dist_coeffs_right, R2, P2,
+            (left_gray.shape[1], left_gray.shape[0]), cv2.CV_32FC1)
+        
+        # Compute overlap masks
+        print("Computing overlap masks...")
+        overlap_mask_left, overlap_mask_right, overlap_info = self.compute_overlap_mask(
+            camera_matrix_left, dist_coeffs_left,
+            camera_matrix_right, dist_coeffs_right,
+            R, T,
+            (left_gray.shape[1], left_gray.shape[0])
+        )
+        
+        # Also compute overlap masks for RECTIFIED images (more useful for stereo matching)
+        print("Computing overlap masks for rectified images...")
+        overlap_mask_left_rect, overlap_mask_right_rect, overlap_info_rect = self.compute_overlap_mask_rectified(
+            P1, P2, R1, R2,
+            (left_gray.shape[1], left_gray.shape[0])
+        )
+        
+        # Compute overlap from actual marker detections (most accurate)
+        print("Computing overlap masks from detected markers...")
+        overlap_mask_left_markers, overlap_mask_right_markers, overlap_info_markers = self.compute_overlap_from_markers(
+            allCorners, allIds,
+            (left_gray.shape[1], left_gray.shape[0])
+        )
+        
+        print(f"\nOverlap Analysis (Original Images):")
+        print(f"  Left camera overlap: {overlap_info['left_overlap_percent']:.1f}% of image")
+        print(f"  Right camera overlap: {overlap_info['right_overlap_percent']:.1f}% of image")
+        print(f"  Overlap region: {overlap_info['overlap_width']}x{overlap_info['overlap_height']} pixels")
+        print(f"  Baseline distance: {np.linalg.norm(T):.3f}m")
+        print(f"  Vergence angle: {overlap_info['vergence_angle']:.2f}°")
+        
+        print(f"\nOverlap Analysis (Rectified Images):")
+        print(f"  Left camera overlap: {overlap_info_rect['left_overlap_percent']:.1f}% of image")
+        print(f"  Right camera overlap: {overlap_info_rect['right_overlap_percent']:.1f}% of image")
+        print(f"  Overlap region: {overlap_info_rect['overlap_width']}x{overlap_info_rect['overlap_height']} pixels")
+        
+        print(f"\nOverlap Analysis (From Detected Markers - Most Accurate):")
+        print(f"  Left camera overlap: {overlap_info_markers['left_overlap_percent']:.1f}% of image")
+        print(f"  Right camera overlap: {overlap_info_markers['right_overlap_percent']:.1f}% of image")
+        print(f"  Overlap region: {overlap_info_markers['overlap_width']}x{overlap_info_markers['overlap_height']} pixels")
+        print(f"  Common markers detected: {overlap_info_markers['common_markers']}/{overlap_info_markers['total_markers']}")
+        
+        # Add rectification data (but not the large rectification maps)
+        data['R1'] = R1
+        data['R2'] = R2
+        data['P1'] = P1
+        data['P2'] = P2
+        data['Q'] = Q
+        data['roi_left'] = roi_left
+        data['roi_right'] = roi_right
+        # Note: map1_left, map2_left, map1_right, map2_right not saved (can be regenerated from R1, R2, P1, P2)
+        data['overlap_mask_left'] = overlap_mask_left
+        data['overlap_mask_right'] = overlap_mask_right
+        data['overlap_mask_left_rect'] = overlap_mask_left_rect
+        data['overlap_mask_right_rect'] = overlap_mask_right_rect
+        data['overlap_mask_left_markers'] = overlap_mask_left_markers
+        data['overlap_mask_right_markers'] = overlap_mask_right_markers
+        data['overlap_info'] = overlap_info
+        data['overlap_info_rect'] = overlap_info_rect
+        data['overlap_info_markers'] = overlap_info_markers
+        
         self.save_calibration("stereo_calibration", data, save_format)
+        
+        # Save overlap masks as separate images for easy inspection
+        overlap_folder = self.image_folders.get('calibration', 'calibration')
+        os.makedirs(overlap_folder, exist_ok=True)
+        cv2.imwrite(os.path.join(overlap_folder, 'overlap_mask_left_original.png'), overlap_mask_left)
+        cv2.imwrite(os.path.join(overlap_folder, 'overlap_mask_right_original.png'), overlap_mask_right)
+        cv2.imwrite(os.path.join(overlap_folder, 'overlap_mask_left_rectified.png'), overlap_mask_left_rect)
+        cv2.imwrite(os.path.join(overlap_folder, 'overlap_mask_right_rectified.png'), overlap_mask_right_rect)
+        cv2.imwrite(os.path.join(overlap_folder, 'overlap_mask_left_markers.png'), overlap_mask_left_markers)
+        cv2.imwrite(os.path.join(overlap_folder, 'overlap_mask_right_markers.png'), overlap_mask_right_markers)
+        print(f"\nSaved overlap masks to {overlap_folder}/overlap_mask_*.png")
+        print(f"  Recommended: Use overlap_mask_*_markers.png (based on actual detections)")
+        
+        # Create example rectified image pair from first stereo pair
+        if len(left_images) > 0 and len(right_images) > 0:
+            print("\nCreating example rectified images from first stereo pair...")
+            first_left = cv2.imread(left_images[0])
+            first_right = cv2.imread(right_images[0])
+            
+            if first_left is not None and first_right is not None:
+                # Rectify the images
+                left_rectified = cv2.remap(first_left, map1_left, map2_left, cv2.INTER_LINEAR)
+                right_rectified = cv2.remap(first_right, map1_right, map2_right, cv2.INTER_LINEAR)
+                
+                # Save rectified images
+                cv2.imwrite(os.path.join(overlap_folder, 'example_left_rectified.png'), left_rectified)
+                cv2.imwrite(os.path.join(overlap_folder, 'example_right_rectified.png'), right_rectified)
+                
+                # Create side-by-side comparison
+                original_pair = np.hstack([first_left, first_right])
+                rectified_pair = np.hstack([left_rectified, right_rectified])
+                
+                # Draw horizontal lines on rectified pair to show epipolar alignment
+                rectified_with_lines = rectified_pair.copy()
+                for y in range(0, rectified_pair.shape[0], rectified_pair.shape[0] // 10):
+                    cv2.line(rectified_with_lines, (0, y), (rectified_pair.shape[1], y), (0, 255, 0), 1)
+                
+                # Stack original and rectified vertically
+                comparison = np.vstack([original_pair, rectified_with_lines])
+                
+                # Add labels
+                font = cv2.FONT_HERSHEY_SIMPLEX
+                cv2.putText(comparison, 'Original Images', (20, 40), font, 1.2, (255, 255, 255), 2)
+                cv2.putText(comparison, 'Rectified Images (green lines = epipolar lines)', 
+                           (20, first_left.shape[0] + 40), font, 1.2, (255, 255, 255), 2)
+                
+                cv2.imwrite(os.path.join(overlap_folder, 'rectification_comparison.png'), comparison)
+                print(f"Saved example rectified images to {overlap_folder}/")
+                print(f"  - example_left_rectified.png")
+                print(f"  - example_right_rectified.png")
+                print(f"  - rectification_comparison.png (shows before/after with epipolar lines)")
+        
         print("Stereo Calibration complete")
+    
+    
+    def compute_overlap_mask(self, K1, D1, K2, D2, R, T, image_size):
+        """
+        Compute overlap masks for divergent stereo cameras.
+        
+        Args:
+            K1, D1: Camera matrix and distortion coefficients for left camera
+            K2, D2: Camera matrix and distortion coefficients for right camera
+            R, T: Rotation and translation from left to right camera
+            image_size: (width, height) of images
+            
+        Returns:
+            overlap_mask_left: Binary mask showing overlap region in left camera
+            overlap_mask_right: Binary mask showing overlap region in right camera
+            overlap_info: Dictionary with overlap statistics
+        """
+        width, height = image_size
+        
+        # Create meshgrid of pixel coordinates
+        x_coords, y_coords = np.meshgrid(np.arange(width), np.arange(height))
+        pixels = np.stack([x_coords, y_coords], axis=-1).reshape(-1, 2).astype(np.float32)
+        
+        # Undistort points from left camera
+        points_undist_left = cv2.undistortPoints(
+            pixels.reshape(-1, 1, 2), K1, D1, P=K1
+        ).reshape(-1, 2)
+        
+        # Convert to normalized camera coordinates
+        points_norm_left = cv2.undistortPoints(
+            pixels.reshape(-1, 1, 2), K1, D1
+        ).reshape(-1, 2)
+        
+        # Add z=1 to make homogeneous 3D points
+        points_3d = np.column_stack([points_norm_left, np.ones(len(points_norm_left))])
+        
+        # Transform to right camera coordinate system
+        points_3d_right = (R @ points_3d.T).T + T.reshape(1, 3)
+        
+        # Project to right camera image plane
+        points_2d_right = points_3d_right[:, :2] / points_3d_right[:, 2:3]
+        
+        # Apply camera matrix and distortion
+        rvec = np.zeros(3)
+        tvec = np.zeros(3)
+        points_right_distorted, _ = cv2.projectPoints(
+            points_3d_right, rvec, tvec, K2, D2
+        )
+        points_right_distorted = points_right_distorted.reshape(-1, 2)
+        
+        # Check which points from left camera fall within right camera's FOV
+        valid_in_right = (
+            (points_right_distorted[:, 0] >= 0) &
+            (points_right_distorted[:, 0] < width) &
+            (points_right_distorted[:, 1] >= 0) &
+            (points_right_distorted[:, 1] < height) &
+            (points_3d_right[:, 2] > 0)  # In front of camera
+        )
+        
+        # Similarly check points from right camera visible in left
+        pixels_right = pixels.copy()
+        points_norm_right = cv2.undistortPoints(
+            pixels_right.reshape(-1, 1, 2), K2, D2
+        ).reshape(-1, 2)
+        
+        points_3d_right_cam = np.column_stack([points_norm_right, np.ones(len(points_norm_right))])
+        
+        # Transform to left camera coordinate system
+        R_inv = R.T
+        T_inv = -R.T @ T
+        points_3d_left = (R_inv @ points_3d_right_cam.T).T + T_inv.reshape(1, 3)
+        
+        # Project to left camera
+        points_left_distorted, _ = cv2.projectPoints(
+            points_3d_left, rvec, tvec, K1, D1
+        )
+        points_left_distorted = points_left_distorted.reshape(-1, 2)
+        
+        valid_in_left = (
+            (points_left_distorted[:, 0] >= 0) &
+            (points_left_distorted[:, 0] < width) &
+            (points_left_distorted[:, 1] >= 0) &
+            (points_left_distorted[:, 1] < height) &
+            (points_3d_left[:, 2] > 0)
+        )
+        
+        # Create masks
+        overlap_mask_left = valid_in_right.reshape(height, width).astype(np.uint8) * 255
+        overlap_mask_right = valid_in_left.reshape(height, width).astype(np.uint8) * 255
+        
+        # Compute overlap statistics
+        left_overlap_pixels = np.sum(valid_in_right)
+        right_overlap_pixels = np.sum(valid_in_left)
+        total_pixels = width * height
+        
+        # Find bounding box of overlap region in left camera
+        overlap_coords_left = np.where(overlap_mask_left > 0)
+        if len(overlap_coords_left[0]) > 0:
+            y_min_left = np.min(overlap_coords_left[0])
+            y_max_left = np.max(overlap_coords_left[0])
+            x_min_left = np.min(overlap_coords_left[1])
+            x_max_left = np.max(overlap_coords_left[1])
+            overlap_width_left = x_max_left - x_min_left
+            overlap_height_left = y_max_left - y_min_left
+        else:
+            overlap_width_left = overlap_height_left = 0
+        
+        # Compute vergence angle (angle between optical axes)
+        # Optical axis of left camera in left camera coords
+        optical_axis_left = np.array([0, 0, 1])
+        # Optical axis of right camera in right camera coords
+        optical_axis_right = np.array([0, 0, 1])
+        # Transform right camera optical axis to left camera coords
+        optical_axis_right_in_left = R_inv @ optical_axis_right
+        # Compute angle
+        cos_angle = np.dot(optical_axis_left, optical_axis_right_in_left)
+        vergence_angle = np.degrees(np.arccos(np.clip(cos_angle, -1, 1)))
+        
+        overlap_info = {
+            'left_overlap_percent': 100 * left_overlap_pixels / total_pixels,
+            'right_overlap_percent': 100 * right_overlap_pixels / total_pixels,
+            'overlap_width': overlap_width_left,
+            'overlap_height': overlap_height_left,
+            'vergence_angle': vergence_angle,
+            'baseline': float(np.linalg.norm(T))
+        }
+        
+        return overlap_mask_left, overlap_mask_right, overlap_info
+    
+    
+    def compute_overlap_mask_rectified(self, P1, P2, R1, R2, image_size):
+        """
+        Compute overlap masks for rectified stereo images.
+        After rectification, the images are aligned so corresponding points are on the same row.
+        The overlap is much simpler to compute - just find the horizontal overlap region.
+        
+        Args:
+            P1, P2: Projection matrices for left and right cameras after rectification
+            R1, R2: Rectification rotation matrices
+            image_size: (width, height) of images
+            
+        Returns:
+            overlap_mask_left: Binary mask showing overlap region in left rectified image
+            overlap_mask_right: Binary mask showing overlap region in right rectified image
+            overlap_info: Dictionary with overlap statistics
+        """
+        width, height = image_size
+        
+        # For rectified images, we need to find which columns in each image correspond
+        # to the same 3D space. This is done by checking the disparity range.
+        
+        # Create masks - initially all white (full overlap)
+        overlap_mask_left = np.ones((height, width), dtype=np.uint8) * 255
+        overlap_mask_right = np.ones((height, width), dtype=np.uint8) * 255
+        
+        # The principal points tell us where the optical axes intersect the image plane
+        cx_left = P1[0, 2]
+        cx_right = P2[0, 2]
+        
+        # The baseline in rectified coordinates
+        baseline = P2[0, 3] / P2[0, 0] if P2[0, 0] != 0 else 0
+        
+        # For divergent cameras, the overlap region is where both cameras can see
+        # In rectified space, this is typically a central region
+        # Left image: right side overlaps with right camera
+        # Right image: left side overlaps with left camera
+        
+        # Simple approach: mark the overlap based on the offset between principal points
+        offset = int(abs(cx_right - cx_left))
+        
+        if cx_left < cx_right:
+            # Left camera sees more on the left, right camera sees more on the right
+            # Overlap is the right portion of left image and left portion of right image
+            overlap_mask_left[:, :max(0, width - offset)] = 0
+            overlap_mask_right[:, min(width, offset):] = 0
+        else:
+            # Right camera sees more on the left, left camera sees more on the right
+            overlap_mask_left[:, min(width, offset):] = 0
+            overlap_mask_right[:, :max(0, width - offset)] = 0
+        
+        # Compute statistics
+        left_overlap_pixels = np.sum(overlap_mask_left > 0)
+        right_overlap_pixels = np.sum(overlap_mask_right > 0)
+        total_pixels = width * height
+        
+        # Find bounding box of overlap
+        overlap_coords_left = np.where(overlap_mask_left > 0)
+        if len(overlap_coords_left[0]) > 0:
+            y_min = np.min(overlap_coords_left[0])
+            y_max = np.max(overlap_coords_left[0])
+            x_min = np.min(overlap_coords_left[1])
+            x_max = np.max(overlap_coords_left[1])
+            overlap_width = x_max - x_min
+            overlap_height = y_max - y_min
+        else:
+            overlap_width = overlap_height = 0
+        
+        overlap_info = {
+            'left_overlap_percent': 100 * left_overlap_pixels / total_pixels,
+            'right_overlap_percent': 100 * right_overlap_pixels / total_pixels,
+            'overlap_width': overlap_width,
+            'overlap_height': overlap_height,
+            'baseline': float(abs(baseline))
+        }
+        
+        return overlap_mask_left, overlap_mask_right, overlap_info
+    
+    
+    def compute_overlap_from_markers(self, allCorners, allIds, image_size):
+        """
+        Compute overlap masks based on actual detected markers in stereo pairs.
+        This is the most accurate method as it uses real detections from calibration.
+        
+        Args:
+            allCorners: Dictionary with 'left' and 'right' lists of detected corners
+            allIds: Dictionary with 'left' and 'right' lists of detected marker IDs
+            image_size: (width, height) of images
+            
+        Returns:
+            overlap_mask_left: Binary mask showing overlap region in left camera
+            overlap_mask_right: Binary mask showing overlap region in right camera
+            overlap_info: Dictionary with overlap statistics
+        """
+        width, height = image_size
+        
+        # Collect all marker corner positions that were detected in BOTH cameras
+        left_points = []
+        right_points = []
+        common_marker_count = 0
+        total_left_markers = set()
+        total_right_markers = set()
+        pairs_processed = 0
+        
+        # Iterate through all stereo pairs
+        for i in range(min(len(allCorners['left']), len(allCorners['right']))):
+            left_ids = allIds['left'][i].flatten() if allIds['left'][i] is not None else []
+            right_ids = allIds['right'][i].flatten() if allIds['right'][i] is not None else []
+            
+            total_left_markers.update(left_ids)
+            total_right_markers.update(right_ids)
+            
+            # Find markers visible in both cameras
+            common_ids = np.intersect1d(left_ids, right_ids)
+            
+            if len(common_ids) > 0:
+                pairs_processed += 1
+                common_marker_count = max(common_marker_count, len(common_ids))
+                
+                # Get indices of common markers
+                indices_left = np.isin(left_ids, common_ids)
+                indices_right = np.isin(right_ids, common_ids)
+                
+                # Extract corner positions for common markers
+                left_corners = allCorners['left'][i][indices_left].reshape(-1, 2)
+                right_corners = allCorners['right'][i][indices_right].reshape(-1, 2)
+                
+                left_points.extend(left_corners)
+                right_points.extend(right_corners)
+        
+        print(f"  Processed {pairs_processed} stereo pairs with common markers")
+        print(f"  Collected {len(left_points)} corner points from left camera")
+        print(f"  Collected {len(right_points)} corner points from right camera")
+        
+        if len(left_points) == 0 or len(right_points) == 0:
+            # No overlap found - return empty masks
+            print("Warning: No common markers detected in stereo pairs!")
+            overlap_mask_left = np.zeros((height, width), dtype=np.uint8)
+            overlap_mask_right = np.zeros((height, width), dtype=np.uint8)
+            overlap_info = {
+                'left_overlap_percent': 0,
+                'right_overlap_percent': 0,
+                'overlap_width': 0,
+                'overlap_height': 0,
+                'common_markers': 0,
+                'total_markers': 0
+            }
+            return overlap_mask_left, overlap_mask_right, overlap_info
+        
+        # Convert to numpy arrays
+        left_points = np.array(left_points)
+        right_points = np.array(right_points)
+        
+        # Compute convex hull for each camera's overlap region
+        from scipy.spatial import ConvexHull
+        
+        # Left camera overlap region
+        hull_left = ConvexHull(left_points)
+        hull_points_left = left_points[hull_left.vertices].astype(np.int32)
+        
+        # Right camera overlap region
+        hull_right = ConvexHull(right_points)
+        hull_points_right = right_points[hull_right.vertices].astype(np.int32)
+        
+        # Create masks by filling the convex hulls
+        overlap_mask_left = np.zeros((height, width), dtype=np.uint8)
+        overlap_mask_right = np.zeros((height, width), dtype=np.uint8)
+        
+        cv2.fillConvexPoly(overlap_mask_left, hull_points_left, 255)
+        cv2.fillConvexPoly(overlap_mask_right, hull_points_right, 255)
+        
+        # Compute statistics
+        left_overlap_pixels = np.sum(overlap_mask_left > 0)
+        right_overlap_pixels = np.sum(overlap_mask_right > 0)
+        total_pixels = width * height
+        
+        # Find bounding box
+        overlap_coords_left = np.where(overlap_mask_left > 0)
+        if len(overlap_coords_left[0]) > 0:
+            y_min = np.min(overlap_coords_left[0])
+            y_max = np.max(overlap_coords_left[0])
+            x_min = np.min(overlap_coords_left[1])
+            x_max = np.max(overlap_coords_left[1])
+            overlap_width = x_max - x_min
+            overlap_height = y_max - y_min
+        else:
+            overlap_width = overlap_height = 0
+        
+        total_unique_markers = len(total_left_markers.union(total_right_markers))
+        
+        overlap_info = {
+            'left_overlap_percent': 100 * left_overlap_pixels / total_pixels,
+            'right_overlap_percent': 100 * right_overlap_pixels / total_pixels,
+            'overlap_width': overlap_width,
+            'overlap_height': overlap_height,
+            'common_markers': common_marker_count,
+            'total_markers': total_unique_markers
+        }
+        
+        return overlap_mask_left, overlap_mask_right, overlap_info
+    
+    
+    def visualize_stereo_overlap(self, left_image_path, right_image_path, stereo_calib_file):
+        """
+        Visualize the overlap region on actual stereo images.
+        
+        Args:
+            left_image_path: Path to left camera image
+            right_image_path: Path to right camera image
+            stereo_calib_file: Path to stereo calibration file
+        """
+        # Load stereo calibration
+        if stereo_calib_file.endswith('.npz'):
+            data = dict(np.load(stereo_calib_file))
+        elif stereo_calib_file.endswith('.yaml'):
+            fs = cv2.FileStorage(stereo_calib_file, cv2.FILE_STORAGE_READ)
+            data = {}
+            root = fs.root()
+            for i in range(root.size()):
+                node = root.at(i)
+                key = node.name()
+                if node.isMat():
+                    data[key] = node.mat()
+            fs.release()
+        else:
+            print("Error: Unsupported calibration file format")
+            return
+        
+        # Load images
+        left_img = cv2.imread(left_image_path)
+        right_img = cv2.imread(right_image_path)
+        
+        if left_img is None or right_img is None:
+            print("Error: Could not load images")
+            return
+        
+        # Get overlap masks
+        overlap_mask_left = data.get('overlap_mask_left')
+        overlap_mask_right = data.get('overlap_mask_right')
+        
+        if overlap_mask_left is None or overlap_mask_right is None:
+            print("Error: Overlap masks not found in calibration file")
+            return
+        
+        # Create colored overlay (green = overlap region)
+        overlay_left = left_img.copy()
+        overlay_right = right_img.copy()
+        
+        # Apply green tint to overlap regions
+        overlay_left[overlap_mask_left > 0] = cv2.addWeighted(
+            overlay_left[overlap_mask_left > 0], 0.7,
+            np.array([0, 255, 0], dtype=np.uint8), 0.3, 0
+        )
+        overlay_right[overlap_mask_right > 0] = cv2.addWeighted(
+            overlay_right[overlap_mask_right > 0], 0.7,
+            np.array([0, 255, 0], dtype=np.uint8), 0.3, 0
+        )
+        
+        # Create side-by-side visualization
+        combined = np.hstack([overlay_left, overlay_right])
+        
+        # Create transparent shading visualization
+        # Non-overlap regions get semi-transparent dark overlay
+        shaded_left = left_img.copy().astype(np.float32)
+        shaded_right = right_img.copy().astype(np.float32)
+        
+        # Darken non-overlap areas (multiply by 0.3 for 70% transparency effect)
+        shaded_left[overlap_mask_left == 0] = shaded_left[overlap_mask_left == 0] * 0.3
+        shaded_right[overlap_mask_right == 0] = shaded_right[overlap_mask_right == 0] * 0.3
+        
+        # Convert back to uint8
+        shaded_left = shaded_left.astype(np.uint8)
+        shaded_right = shaded_right.astype(np.uint8)
+        
+        # Create side-by-side with shading
+        combined_shaded = np.hstack([shaded_left, shaded_right])
+        
+        # Add text labels
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        font_scale = 1.0
+        thickness = 2
+        color = (255, 255, 255)
+        
+        # Labels for green overlay version
+        cv2.putText(combined, 'Left Camera', (20, 40), font, font_scale, color, thickness)
+        cv2.putText(combined, 'Right Camera', (left_img.shape[1] + 20, 40), 
+                   font, font_scale, color, thickness)
+        cv2.putText(combined, 'Green = Overlap Region', (20, combined.shape[0] - 20), 
+                   font, font_scale, (0, 255, 0), thickness)
+        
+        # Labels for shaded version
+        cv2.putText(combined_shaded, 'Left Camera', (20, 40), font, font_scale, color, thickness)
+        cv2.putText(combined_shaded, 'Right Camera', (shaded_left.shape[1] + 20, 40), 
+                   font, font_scale, color, thickness)
+        cv2.putText(combined_shaded, 'Bright = Overlap Region', (20, combined_shaded.shape[0] - 20), 
+                   font, font_scale, color, thickness)
+        
+        # Stack both visualizations vertically
+        final_visualization = np.vstack([combined, combined_shaded])
+        
+        # Display both versions
+        cv2.imshow('Stereo Overlap Visualization', final_visualization)
+        print("\nShowing overlap visualization:")
+        print("  Top row: Green overlay marks overlap regions")
+        print("  Bottom row: Transparent shading (bright = overlap, dark = non-overlap)")
+        print("Press any key to close...")
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
+        
+        # Save visualizations
+        os.makedirs('calibration', exist_ok=True)
+        
+        # Save combined version with both styles
+        output_combined = 'calibration/stereo_overlap_visualization.png'
+        cv2.imwrite(output_combined, final_visualization)
+        print(f"\nSaved combined visualization to {output_combined}")
+        
+        # Save individual versions
+        output_green = 'calibration/stereo_overlap_green.png'
+        cv2.imwrite(output_green, combined)
+        print(f"Saved green overlay version to {output_green}")
+        
+        output_shaded = 'calibration/stereo_overlap_shaded.png'
+        cv2.imwrite(output_shaded, combined_shaded)
+        print(f"Saved transparent shading version to {output_shaded}")
 
 
     def convert_calibration(self, input_file, output_format):
@@ -905,21 +1545,145 @@ class Calibration:
 
 
     def load_calibrations(self):
-        """Load previously saved calibration data from .npz files."""
-        if(os.path.exists('left.npz')):
-            self.left_calibration = np.load('left.npz')
+        """Load previously saved calibration data from files (supports .npz and .yaml)."""
+        # Try to load left calibration
+        for ext in ['.yaml', '.yml', '.npz']:
+            left_file = f'calibration/left{ext}'
+            if os.path.exists(left_file):
+                print(f"Loading left calibration from {left_file}")
+                if ext == '.npz':
+                    self.left_calibration = dict(np.load(left_file))
+                else:
+                    self.left_calibration = self._load_yaml_calibration(left_file)
+                break
+        else:
+            # Fallback to old location
+            if os.path.exists('left.npz'):
+                print("Loading left calibration from left.npz")
+                self.left_calibration = dict(np.load('left.npz'))
         
-        if(os.path.exists('right.npz')):
-            self.right_calibration = np.load('right.npz')
-                
-        if(os.path.exists('left_fisheye.npz')):
-            self.left_fisheye_calibration = np.load('left_fisheye.npz')
+        # Try to load right calibration
+        for ext in ['.yaml', '.yml', '.npz']:
+            right_file = f'calibration/right{ext}'
+            if os.path.exists(right_file):
+                print(f"Loading right calibration from {right_file}")
+                if ext == '.npz':
+                    self.right_calibration = dict(np.load(right_file))
+                else:
+                    self.right_calibration = self._load_yaml_calibration(right_file)
+                break
+        else:
+            # Fallback to old location
+            if os.path.exists('right.npz'):
+                print("Loading right calibration from right.npz")
+                self.right_calibration = dict(np.load('right.npz'))
         
-        if(os.path.exists('right_fisheye.npz')):
-            self.right_fisheye_calibration = np.load('right_fisheye.npz')
+        # Try to load fisheye calibrations
+        for ext in ['.yaml', '.yml', '.npz']:
+            left_fisheye_file = f'calibration/left_fisheye{ext}'
+            if os.path.exists(left_fisheye_file):
+                if ext == '.npz':
+                    self.left_fisheye_calibration = dict(np.load(left_fisheye_file))
+                else:
+                    self.left_fisheye_calibration = self._load_yaml_calibration(left_fisheye_file)
+                break
+        else:
+            if os.path.exists('left_fisheye.npz'):
+                self.left_fisheye_calibration = dict(np.load('left_fisheye.npz'))
         
-        if(os.path.exists('stereo_calibration.npz')):
-            self.stereo_calibration = np.load('stereo_calibration.npz')
+        for ext in ['.yaml', '.yml', '.npz']:
+            right_fisheye_file = f'calibration/right_fisheye{ext}'
+            if os.path.exists(right_fisheye_file):
+                if ext == '.npz':
+                    self.right_fisheye_calibration = dict(np.load(right_fisheye_file))
+                else:
+                    self.right_fisheye_calibration = self._load_yaml_calibration(right_fisheye_file)
+                break
+        else:
+            if os.path.exists('right_fisheye.npz'):
+                self.right_fisheye_calibration = dict(np.load('right_fisheye.npz'))
+        
+        # Try to load stereo calibration
+        for ext in ['.yaml', '.yml', '.npz']:
+            stereo_file = f'calibration/stereo_calibration{ext}'
+            if os.path.exists(stereo_file):
+                if ext == '.npz':
+                    self.stereo_calibration = dict(np.load(stereo_file))
+                else:
+                    self.stereo_calibration = self._load_yaml_calibration(stereo_file)
+                break
+        else:
+            if os.path.exists('stereo_calibration.npz'):
+                self.stereo_calibration = dict(np.load('stereo_calibration.npz'))
+    
+    
+    def _load_yaml_calibration(self, filepath):
+        """Helper method to load calibration from YAML file."""
+        fs = cv2.FileStorage(filepath, cv2.FILE_STORAGE_READ)
+        data = {}
+        
+        # Read common calibration keys using direct access
+        # String values
+        camera_label = fs.getNode('camera_label')
+        if not camera_label.empty():
+            data['camera_label'] = camera_label.string()
+        
+        model = fs.getNode('model')
+        if not model.empty():
+            data['model'] = model.string()
+        
+        # Integer values
+        image_width = fs.getNode('image_width')
+        if not image_width.empty():
+            data['image_width'] = int(image_width.real())
+        
+        image_height = fs.getNode('image_height')
+        if not image_height.empty():
+            data['image_height'] = int(image_height.real())
+        
+        # Matrix values - these are the critical ones
+        matrix_keys = [
+            'camera_matrix', 'dist_coeffs', 
+            'camera_matrix_left', 'dist_coeffs_left',
+            'camera_matrix_right', 'dist_coeffs_right',
+            'R', 'T', 'E', 'F',
+            'R1', 'R2', 'P1', 'P2', 'Q',
+            'map1_left', 'map2_left', 'map1_right', 'map2_right',
+            'overlap_mask_left', 'overlap_mask_right'
+        ]
+        
+        for key in matrix_keys:
+            node = fs.getNode(key)
+            if not node.empty():
+                mat_data = node.mat()
+                if mat_data is not None:
+                    data[key] = mat_data
+        
+        # Tuple values (ROI)
+        roi_left = fs.getNode('roi_left')
+        if not roi_left.empty():
+            data['roi_left'] = tuple(int(roi_left.at(i).real()) for i in range(4))
+        
+        roi_right = fs.getNode('roi_right')
+        if not roi_right.empty():
+            data['roi_right'] = tuple(int(roi_right.at(i).real()) for i in range(4))
+        
+        # Sequence of matrices (rvecs, tvecs)
+        seq_keys = ['rvecs', 'tvecs']
+        for key in seq_keys:
+            node = fs.getNode(key)
+            if not node.empty() and node.isSeq():
+                seq_data = []
+                for j in range(node.size()):
+                    item = node.at(j)
+                    mat_data = item.mat()
+                    if mat_data is not None:
+                        seq_data.append(mat_data)
+                if seq_data:
+                    data[key] = seq_data
+        
+        fs.release()
+        return data
 
 
     def rectify_images(self, left_image, right_image):

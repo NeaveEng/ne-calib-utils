@@ -98,9 +98,23 @@ python main.py --action calibrate-right
 # Perform stereo calibration
 python main.py --action stereo-calibrate
 
+# Visualize overlap region for divergent cameras
+python main.py --action visualize-overlap \
+    --left-image images/stereo/stereo_left_01.jpg \
+    --right-image images/stereo/stereo_right_01.jpg \
+    --stereo-calib calibration/stereo_calibration.yaml
+
 # Preview stereo feed
 python main.py --action preview
 ```
+
+### Divergent Stereo Cameras
+
+If you're using cameras with divergent (non-parallel) optical axes, see the **[Divergent Stereo Camera Guide](DIVERGENT_STEREO.md)** for:
+- Computing overlap masks showing the overlapping field of view
+- Analyzing vergence angle and baseline distance
+- Optimizing stereo rectification for divergent configurations
+- Visualizing overlap regions on actual images
 
 ### Using Custom Configuration
 
@@ -149,11 +163,25 @@ calibrate.stereo_calibrate()
 
 ## Output Files
 
-Calibration data is saved as `.npz` files:
-- `left.npz` - Left camera calibration
-- `right.npz` - Right camera calibration
-- `left_fisheye.npz` - Left camera fisheye calibration
-- `right_fisheye.npz` - Right camera fisheye calibration
-- `stereo_calibration.npz` - Stereo calibration data 
+Calibration data is saved in your chosen format (NPZ, YAML, or both):
+- `left.npz/.yaml` - Left camera calibration
+- `right.npz/.yaml` - Right camera calibration
+- `left_fisheye.npz/.yaml` - Left camera fisheye calibration
+- `right_fisheye.npz/.yaml` - Right camera fisheye calibration
+- `stereo_calibration.npz/.yaml` - Stereo calibration data with extrinsics
+
+### Stereo Calibration Output
+
+The stereo calibration file includes:
+- **Intrinsics**: Camera matrices and distortion coefficients for both cameras
+- **Extrinsics**: Rotation (R) and translation (T) between cameras
+- **Rectification**: Maps for aligning image planes (R1, R2, P1, P2, Q)
+- **Overlap Masks**: Binary masks showing overlapping field of view
+- **Metadata**: Vergence angle, baseline distance, overlap statistics
+
+For divergent cameras, additional masks are saved:
+- `calibration/overlap_mask_left.png` - Left camera overlap region
+- `calibration/overlap_mask_right.png` - Right camera overlap region
+- `calibration/stereo_overlap_visualization.png` - Visual overlay (when using visualize-overlap) 
 
 
