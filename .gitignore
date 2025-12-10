@@ -9,6 +9,7 @@ venv.bak/
 # Calibration images and data
 images/
 calibration/
+*.zip
 
 # Calibration output files
 *.npz
