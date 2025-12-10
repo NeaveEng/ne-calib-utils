@@ -1,0 +1,8 @@
+# Minimal requirements for utilities only
+# Use this for setup commands and image renaming utilities
+# (no OpenCV or camera libraries needed)
+
+# No dependencies required for:
+# - python main.py -a create-config
+# - python main.py -a setup-folders
+# - python rename_images.py (all modes)

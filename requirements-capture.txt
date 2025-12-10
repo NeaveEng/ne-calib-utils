@@ -1,0 +1,6 @@
+# Full requirements for Raspberry Pi with camera capture
+# Use this when you need to capture images from PiCamera2
+
+opencv-contrib-python>=4.7.0
+numpy>=1.21.0
+picamera2>=0.3.0

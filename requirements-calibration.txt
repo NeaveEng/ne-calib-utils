@@ -1,0 +1,7 @@
+# Core requirements for calibration only
+# Use this if you only need to process images and calibrate cameras
+# (no live camera capture needed)
+
+opencv-contrib-python>=4.7.0
+numpy>=1.21.0
+scipy>=1.7.0

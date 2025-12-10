@@ -1,0 +1,7 @@
+# Full requirements - all features
+# Use this when you need everything
+
+opencv-contrib-python>=4.7.0
+numpy>=1.21.0
+scipy>=1.7.0
+picamera2>=0.3.0

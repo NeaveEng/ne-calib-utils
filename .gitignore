@@ -1,3 +1,33 @@
-env/**
-images/** 
+# Python virtual environments
+env/
+venv/
+.venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Calibration images and data
+images/
+calibration/
+
+# Calibration output files
 *.npz
+*.yaml
+*.yml
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
