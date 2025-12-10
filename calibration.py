@@ -530,8 +530,12 @@ class Calibration:
         
         if len(images) > max_images:
             selected_indices = self.select_diverse_images(image_scores, max_images)
-            images_data = [images_data[i] for i in selected_indices]
-            print(f"Selected {len(images_data)} diverse images from {len(images)} total")
+            images_data_selected = [images_data[i] for i in selected_indices]
+            
+            # Keep track of unused images for backfill
+            unused_indices = [i for i in range(len(images_data)) if i not in selected_indices]
+            
+            print(f"Selected {len(images_data_selected)} diverse images from {len(images)} total")
             
             # Show coverage statistics
             all_radial = set()
@@ -556,22 +560,25 @@ class Calibration:
                       f"tilt {min(pose_tilts):.1f}-{max(pose_tilts):.1f}°, "
                       f"rotation {min(pose_rotations):.1f}-{max(pose_rotations):.1f}°")
         else:
-            print(f"Using all {len(images_data)} images")
+            images_data_selected = images_data
+            unused_indices = []
+            print(f"Using all {len(images_data_selected)} images")
         
         # Second pass: extract calibration data from selected images
         all_charuco_corners = []
         all_charuco_ids = []
-        ignored_images = 0
-        total_images = len(images_data)
+        failed_indices = []
+        total_images = len(images_data_selected)
         
         print("Extracting calibration data...")
-        for idx, img_data in enumerate(images_data, 1):
-            if idx % 10 == 0 or idx == total_images:
-                print(f"Progress: {idx}/{total_images} images processed...")
+        for idx, img_data in enumerate(images_data_selected):
+            display_idx = idx + 1
+            if display_idx % 10 == 0 or display_idx == total_images:
+                print(f"Progress: {display_idx}/{total_images} images processed...")
             
             image = cv2.imread(img_data['file'])
             if image is None:
-                ignored_images += 1
+                failed_indices.append(idx)
                 continue
             
             image_gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -581,6 +588,7 @@ class Calibration:
             if marker_corners is not None and len(marker_corners) >= self.markers_required:
                 if(len(marker_corners) != len(marker_ids)):
                     print(f"Error: Marker corners and IDs are not the same length")
+                    failed_indices.append(idx)
                     continue
                 retval, charuco_corners, charuco_ids = cv2.aruco.interpolateCornersCharuco(
                     marker_corners, marker_ids, image_gray, self.marker_detector.board)
@@ -588,11 +596,44 @@ class Calibration:
                     all_charuco_corners.append(charuco_corners)
                     all_charuco_ids.append(charuco_ids)
                 else:
-                    ignored_images += 1
+                    failed_indices.append(idx)
             else:
-                ignored_images += 1
-                    
-        print(f"Ignored {ignored_images} images of {len(images)}")
+                failed_indices.append(idx)
+        
+        # Backfill with unused images if we lost any during validation
+        if failed_indices and unused_indices:
+            print(f"\n{len(failed_indices)} images failed validation, attempting to backfill from unused images...")
+            backfilled = 0
+            
+            for unused_idx in unused_indices:
+                if backfilled >= len(failed_indices):
+                    break
+                
+                img_data = images_data[unused_idx]
+                image = cv2.imread(img_data['file'])
+                if image is None:
+                    continue
+                
+                image_gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+                marker_corners = img_data['corners']
+                marker_ids = img_data['ids']
+                
+                if marker_corners is not None and len(marker_corners) >= self.markers_required:
+                    if len(marker_corners) != len(marker_ids):
+                        continue
+                    retval, charuco_corners, charuco_ids = cv2.aruco.interpolateCornersCharuco(
+                        marker_corners, marker_ids, image_gray, self.marker_detector.board)
+                    if retval > 0:
+                        all_charuco_corners.append(charuco_corners)
+                        all_charuco_ids.append(charuco_ids)
+                        backfilled += 1
+            
+            if backfilled > 0:
+                print(f"Successfully backfilled {backfilled} replacement images")
+        
+        final_ignored = len(failed_indices) - (backfilled if failed_indices and unused_indices else 0)
+        if final_ignored > 0:
+            print(f"\nIgnored {final_ignored} of {len(images_data_selected)} selected images (could not backfill)")
         print(f"Calibrating using {len(all_charuco_corners)} images with valid corners")
         
         if len(all_charuco_corners) == 0:
@@ -616,13 +657,6 @@ class Calibration:
                 if(len(corners) > 0):
                     object_points.append(self.marker_detector.board.getChessboardCorners()[ids])
                     image_points.append(corners)
-            
-            if(camera_name == "left"):
-                camera_matrix = self.left_calibration["camera_matrix"]
-                dist_coeffs = self.left_calibration["dist_coeffs"]        
-            else:
-                camera_matrix = self.right_calibration["camera_matrix"]
-                dist_coeffs = self.right_calibration["dist_coeffs"]
 
             image_count = len(all_charuco_corners)
             rvecs = [np.zeros((1, 1, 3), dtype=np.float64) for i in range(image_count)]
@@ -632,8 +666,8 @@ class Calibration:
                 object_points,
                 image_points,
                 image_shape,
-                camera_matrix,
-                dist_coeffs,
+                K,  # Use initialized zeros, not prior calibration
+                D,  # Use initialized zeros, not prior calibration
                 rvecs,
                 tvecs,
                 cv2.fisheye.CALIB_RECOMPUTE_EXTRINSIC + cv2.fisheye.CALIB_CHECK_COND + cv2.fisheye.CALIB_FIX_SKEW,
@@ -655,16 +689,28 @@ class Calibration:
             }
             self.save_calibration(f"{camera_name}_fisheye", data, save_format)           
         else:
-            # Try new API first (OpenCV 4.7+), fall back to old API
-            try:
-                retval, camera_matrix, dist_coeffs, rvecs, tvecs = cv2.aruco.calibrateCameraCharuco(
-                    all_charuco_corners, all_charuco_ids, self.marker_detector.board, 
-                    image_shape, None, None)
-            except AttributeError:
-                # Older OpenCV versions
-                retval, camera_matrix, dist_coeffs, rvecs, tvecs = cv2.aruco.calibrateCameraCharucoExtended(
-                    all_charuco_corners, all_charuco_ids, self.marker_detector.board, 
-                    image_shape, None, None)[:5]
+            # Use robust calibrateCamera with explicit object point mapping
+            # This matches the approach from the other script for better accuracy
+            all_obj_corners = self.marker_detector.board.getChessboardCorners()
+            
+            obj_points = []
+            img_points = []
+            
+            for corners, ids in zip(all_charuco_corners, all_charuco_ids):
+                # Map detected corner IDs to their 3D positions
+                ids_flat = ids.flatten()
+                obj_pts = all_obj_corners[ids_flat]
+                obj_points.append(obj_pts)
+                img_points.append(corners)
+            
+            # Use cv2.calibrateCamera for more robust optimization
+            retval, camera_matrix, dist_coeffs, rvecs, tvecs = cv2.calibrateCamera(
+                obj_points,
+                img_points,
+                image_shape[::-1],  # (width, height) format
+                None,
+                None
+            )
             
             print(f"camera matrix: {camera_matrix}")
             print(f"dist coeffs: {dist_coeffs}")
