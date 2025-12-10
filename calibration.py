@@ -71,11 +71,45 @@ class Calibration:
         
         # Set rectification alpha
         instance.rectification_alpha = config.getfloat('calibration', 'rectification_alpha')
+        instance.rectification_alpha_left = config.getfloat('calibration', 'rectification_alpha_left')
+        instance.rectification_alpha_right = config.getfloat('calibration', 'rectification_alpha_right')
+        
+        # Set individual calibration flags
+        instance.calib_use_intrinsic_guess = config.getboolean('calibration', 'calib_use_intrinsic_guess')
+        instance.calib_fix_principal_point = config.getboolean('calibration', 'calib_fix_principal_point')
+        instance.calib_fix_aspect_ratio = config.getboolean('calibration', 'calib_fix_aspect_ratio')
+        instance.calib_zero_tangent_dist = config.getboolean('calibration', 'calib_zero_tangent_dist')
+        instance.calib_rational_model = config.getboolean('calibration', 'calib_rational_model')
+        instance.calib_thin_prism_model = config.getboolean('calibration', 'calib_thin_prism_model')
+        instance.calib_tilted_model = config.getboolean('calibration', 'calib_tilted_model')
+        instance.calib_fix_focal_length = config.getboolean('calibration', 'calib_fix_focal_length')
+        instance.calib_fix_k1 = config.getboolean('calibration', 'calib_fix_k1')
+        instance.calib_fix_k2 = config.getboolean('calibration', 'calib_fix_k2')
+        instance.calib_fix_k3 = config.getboolean('calibration', 'calib_fix_k3')
+        instance.calib_fix_k4 = config.getboolean('calibration', 'calib_fix_k4')
+        instance.calib_fix_k5 = config.getboolean('calibration', 'calib_fix_k5')
+        instance.calib_fix_k6 = config.getboolean('calibration', 'calib_fix_k6')
         
         # Set stereo calibration flags
         instance.stereo_fix_intrinsic = config.getboolean('calibration', 'stereo_fix_intrinsic')
         instance.stereo_fix_focal_length = config.getboolean('calibration', 'stereo_fix_focal_length')
         instance.stereo_fix_principal_point = config.getboolean('calibration', 'stereo_fix_principal_point')
+        instance.stereo_fix_aspect_ratio = config.getboolean('calibration', 'stereo_fix_aspect_ratio')
+        instance.stereo_use_intrinsic_guess = config.getboolean('calibration', 'stereo_use_intrinsic_guess')
+        instance.stereo_same_focal_length = config.getboolean('calibration', 'stereo_same_focal_length')
+        instance.stereo_zero_tangent_dist = config.getboolean('calibration', 'stereo_zero_tangent_dist')
+        instance.stereo_rational_model = config.getboolean('calibration', 'stereo_rational_model')
+        instance.stereo_thin_prism_model = config.getboolean('calibration', 'stereo_thin_prism_model')
+        instance.stereo_tilted_model = config.getboolean('calibration', 'stereo_tilted_model')
+        instance.stereo_fix_k1 = config.getboolean('calibration', 'stereo_fix_k1')
+        instance.stereo_fix_k2 = config.getboolean('calibration', 'stereo_fix_k2')
+        instance.stereo_fix_k3 = config.getboolean('calibration', 'stereo_fix_k3')
+        instance.stereo_fix_k4 = config.getboolean('calibration', 'stereo_fix_k4')
+        instance.stereo_fix_k5 = config.getboolean('calibration', 'stereo_fix_k5')
+        instance.stereo_fix_k6 = config.getboolean('calibration', 'stereo_fix_k6')
+        
+        # Set debug output flag
+        instance.generate_debug_images = config.getboolean('calibration', 'generate_debug_images')
         
         # Set marker color
         instance.marker_detector.marker_colour = (
@@ -695,6 +729,7 @@ class Calibration:
                 'image_width': image_shape[1],
                 'image_height': image_shape[0],
                 'model': 'fisheye',
+                'reprojection_error': retval,
                 'K': K,
                 'D': D,
                 'rvecs': rvecs,
@@ -716,13 +751,66 @@ class Calibration:
                 obj_points.append(obj_pts)
                 img_points.append(corners)
             
+            # Build calibration flags
+            calib_flags = 0
+            flag_descriptions = []
+            
+            if hasattr(self, 'calib_use_intrinsic_guess') and self.calib_use_intrinsic_guess:
+                calib_flags |= cv2.CALIB_USE_INTRINSIC_GUESS
+                flag_descriptions.append("CALIB_USE_INTRINSIC_GUESS")
+            if hasattr(self, 'calib_fix_principal_point') and self.calib_fix_principal_point:
+                calib_flags |= cv2.CALIB_FIX_PRINCIPAL_POINT
+                flag_descriptions.append("CALIB_FIX_PRINCIPAL_POINT")
+            if hasattr(self, 'calib_fix_aspect_ratio') and self.calib_fix_aspect_ratio:
+                calib_flags |= cv2.CALIB_FIX_ASPECT_RATIO
+                flag_descriptions.append("CALIB_FIX_ASPECT_RATIO")
+            if hasattr(self, 'calib_zero_tangent_dist') and self.calib_zero_tangent_dist:
+                calib_flags |= cv2.CALIB_ZERO_TANGENT_DIST
+                flag_descriptions.append("CALIB_ZERO_TANGENT_DIST")
+            if hasattr(self, 'calib_rational_model') and self.calib_rational_model:
+                calib_flags |= cv2.CALIB_RATIONAL_MODEL
+                flag_descriptions.append("CALIB_RATIONAL_MODEL")
+            if hasattr(self, 'calib_thin_prism_model') and self.calib_thin_prism_model:
+                calib_flags |= cv2.CALIB_THIN_PRISM_MODEL
+                flag_descriptions.append("CALIB_THIN_PRISM_MODEL")
+            if hasattr(self, 'calib_tilted_model') and self.calib_tilted_model:
+                calib_flags |= cv2.CALIB_TILTED_MODEL
+                flag_descriptions.append("CALIB_TILTED_MODEL")
+            if hasattr(self, 'calib_fix_focal_length') and self.calib_fix_focal_length:
+                calib_flags |= cv2.CALIB_FIX_FOCAL_LENGTH
+                flag_descriptions.append("CALIB_FIX_FOCAL_LENGTH")
+            if hasattr(self, 'calib_fix_k1') and self.calib_fix_k1:
+                calib_flags |= cv2.CALIB_FIX_K1
+                flag_descriptions.append("CALIB_FIX_K1")
+            if hasattr(self, 'calib_fix_k2') and self.calib_fix_k2:
+                calib_flags |= cv2.CALIB_FIX_K2
+                flag_descriptions.append("CALIB_FIX_K2")
+            if hasattr(self, 'calib_fix_k3') and self.calib_fix_k3:
+                calib_flags |= cv2.CALIB_FIX_K3
+                flag_descriptions.append("CALIB_FIX_K3")
+            if hasattr(self, 'calib_fix_k4') and self.calib_fix_k4:
+                calib_flags |= cv2.CALIB_FIX_K4
+                flag_descriptions.append("CALIB_FIX_K4")
+            if hasattr(self, 'calib_fix_k5') and self.calib_fix_k5:
+                calib_flags |= cv2.CALIB_FIX_K5
+                flag_descriptions.append("CALIB_FIX_K5")
+            if hasattr(self, 'calib_fix_k6') and self.calib_fix_k6:
+                calib_flags |= cv2.CALIB_FIX_K6
+                flag_descriptions.append("CALIB_FIX_K6")
+            
+            if calib_flags == 0:
+                print("Using default calibration flags")
+            else:
+                print(f"Using calibration flags: {', '.join(flag_descriptions)}")
+            
             # Use cv2.calibrateCamera for more robust optimization
             retval, camera_matrix, dist_coeffs, rvecs, tvecs = cv2.calibrateCamera(
                 obj_points,
                 img_points,
                 image_shape[::-1],  # (width, height) format
                 None,
-                None
+                None,
+                flags=calib_flags
             )
             
             print(f"camera matrix: {camera_matrix}")
@@ -733,6 +821,7 @@ class Calibration:
                 'image_width': image_shape[1],
                 'image_height': image_shape[0],
                 'model': 'pinhole',
+                'reprojection_error': retval,
                 'camera_matrix': camera_matrix,
                 'dist_coeffs': dist_coeffs,
                 'rvecs': rvecs,
@@ -846,24 +935,63 @@ class Calibration:
             
             # Build stereo calibration flags
             stereo_flags = 0
+            flag_descriptions = []
             
             if use_config_flags and hasattr(self, 'stereo_fix_intrinsic') and self.stereo_fix_intrinsic:
                 stereo_flags |= cv2.CALIB_FIX_INTRINSIC
+                flag_descriptions.append("CALIB_FIX_INTRINSIC: Trust individual calibrations")
             if use_config_flags and hasattr(self, 'stereo_fix_focal_length') and self.stereo_fix_focal_length:
                 stereo_flags |= cv2.CALIB_FIX_FOCAL_LENGTH
+                flag_descriptions.append("CALIB_FIX_FOCAL_LENGTH: Fix focal lengths")
             if use_config_flags and hasattr(self, 'stereo_fix_principal_point') and self.stereo_fix_principal_point:
                 stereo_flags |= cv2.CALIB_FIX_PRINCIPAL_POINT
+                flag_descriptions.append("CALIB_FIX_PRINCIPAL_POINT: Fix principal points")
+            if use_config_flags and hasattr(self, 'stereo_fix_aspect_ratio') and self.stereo_fix_aspect_ratio:
+                stereo_flags |= cv2.CALIB_FIX_ASPECT_RATIO
+                flag_descriptions.append("CALIB_FIX_ASPECT_RATIO: Fix fx/fy ratio")
+            if use_config_flags and hasattr(self, 'stereo_use_intrinsic_guess') and self.stereo_use_intrinsic_guess:
+                stereo_flags |= cv2.CALIB_USE_INTRINSIC_GUESS
+                flag_descriptions.append("CALIB_USE_INTRINSIC_GUESS: Use provided intrinsics as initial guess")
+            if use_config_flags and hasattr(self, 'stereo_same_focal_length') and self.stereo_same_focal_length:
+                stereo_flags |= cv2.CALIB_SAME_FOCAL_LENGTH
+                flag_descriptions.append("CALIB_SAME_FOCAL_LENGTH: Enforce identical focal lengths")
+            if use_config_flags and hasattr(self, 'stereo_zero_tangent_dist') and self.stereo_zero_tangent_dist:
+                stereo_flags |= cv2.CALIB_ZERO_TANGENT_DIST
+                flag_descriptions.append("CALIB_ZERO_TANGENT_DIST: Set p1, p2 to zero")
+            if use_config_flags and hasattr(self, 'stereo_rational_model') and self.stereo_rational_model:
+                stereo_flags |= cv2.CALIB_RATIONAL_MODEL
+                flag_descriptions.append("CALIB_RATIONAL_MODEL: Enable k4, k5, k6")
+            if use_config_flags and hasattr(self, 'stereo_thin_prism_model') and self.stereo_thin_prism_model:
+                stereo_flags |= cv2.CALIB_THIN_PRISM_MODEL
+                flag_descriptions.append("CALIB_THIN_PRISM_MODEL: Enable s1, s2, s3, s4")
+            if use_config_flags and hasattr(self, 'stereo_tilted_model') and self.stereo_tilted_model:
+                stereo_flags |= cv2.CALIB_TILTED_MODEL
+                flag_descriptions.append("CALIB_TILTED_MODEL: Enable tauX, tauY")
+            if use_config_flags and hasattr(self, 'stereo_fix_k1') and self.stereo_fix_k1:
+                stereo_flags |= cv2.CALIB_FIX_K1
+                flag_descriptions.append("CALIB_FIX_K1: Fix k1 coefficient")
+            if use_config_flags and hasattr(self, 'stereo_fix_k2') and self.stereo_fix_k2:
+                stereo_flags |= cv2.CALIB_FIX_K2
+                flag_descriptions.append("CALIB_FIX_K2: Fix k2 coefficient")
+            if use_config_flags and hasattr(self, 'stereo_fix_k3') and self.stereo_fix_k3:
+                stereo_flags |= cv2.CALIB_FIX_K3
+                flag_descriptions.append("CALIB_FIX_K3: Fix k3 coefficient")
+            if use_config_flags and hasattr(self, 'stereo_fix_k4') and self.stereo_fix_k4:
+                stereo_flags |= cv2.CALIB_FIX_K4
+                flag_descriptions.append("CALIB_FIX_K4: Fix k4 coefficient")
+            if use_config_flags and hasattr(self, 'stereo_fix_k5') and self.stereo_fix_k5:
+                stereo_flags |= cv2.CALIB_FIX_K5
+                flag_descriptions.append("CALIB_FIX_K5: Fix k5 coefficient")
+            if use_config_flags and hasattr(self, 'stereo_fix_k6') and self.stereo_fix_k6:
+                stereo_flags |= cv2.CALIB_FIX_K6
+                flag_descriptions.append("CALIB_FIX_K6: Fix k6 coefficient")
             
             if stereo_flags == 0:
                 print("Using default stereo calibration (no flags)")
             else:
                 print("Using stereo calibration flags:")
-                if stereo_flags & cv2.CALIB_FIX_INTRINSIC:
-                    print("  - CALIB_FIX_INTRINSIC: Trusting individual camera calibrations")
-                if stereo_flags & cv2.CALIB_FIX_FOCAL_LENGTH:
-                    print("  - CALIB_FIX_FOCAL_LENGTH: Preserving focal lengths")
-                if stereo_flags & cv2.CALIB_FIX_PRINCIPAL_POINT:
-                    print("  - CALIB_FIX_PRINCIPAL_POINT: Preserving principal points")
+                for desc in flag_descriptions:
+                    print(f"  - {desc}")
             
             ret, camera_matrix_left, dist_coeffs_left, camera_matrix_right, dist_coeffs_right, R, T, E, F = cv2.stereoCalibrate(
                 objectPoints=matched_object_points,
@@ -895,6 +1023,7 @@ class Calibration:
             'image_width': left_gray.shape[1],
             'image_height': left_gray.shape[0],
             'model': 'stereo',
+            'reprojection_error': ret,
             'camera_matrix_left': camera_matrix_left,
             'dist_coeffs_left': dist_coeffs_left,
             'camera_matrix_right': camera_matrix_right,
@@ -916,7 +1045,40 @@ class Calibration:
             flags=cv2.CALIB_ZERO_DISPARITY
         )
         
-        # Compute rectification maps
+        # For divergent cameras, also compute individual undistortion maps (no stereo alignment)
+        print("Computing individual undistortion maps (recommended for divergent cameras)...")
+        # Get optimal new camera matrices for undistortion
+        alpha_left = self.rectification_alpha_left if hasattr(self, 'rectification_alpha_left') else self.rectification_alpha
+        alpha_right = self.rectification_alpha_right if hasattr(self, 'rectification_alpha_right') else self.rectification_alpha
+        
+        new_camera_matrix_left, roi_left_undist = cv2.getOptimalNewCameraMatrix(
+            camera_matrix_left, dist_coeffs_left, 
+            (left_gray.shape[1], left_gray.shape[0]), 
+            alpha_left
+        )
+        new_camera_matrix_right, roi_right_undist = cv2.getOptimalNewCameraMatrix(
+            camera_matrix_right, dist_coeffs_right,
+            (left_gray.shape[1], left_gray.shape[0]),
+            alpha_right
+        )
+        
+        # Create undistortion maps (no rotation, just remove distortion)
+        map1_left_undist, map2_left_undist = cv2.initUndistortRectifyMap(
+            camera_matrix_left, dist_coeffs_left, 
+            None,  # No rotation
+            new_camera_matrix_left,
+            (left_gray.shape[1], left_gray.shape[0]), 
+            cv2.CV_32FC1
+        )
+        map1_right_undist, map2_right_undist = cv2.initUndistortRectifyMap(
+            camera_matrix_right, dist_coeffs_right,
+            None,  # No rotation
+            new_camera_matrix_right,
+            (left_gray.shape[1], left_gray.shape[0]),
+            cv2.CV_32FC1
+        )
+        
+        # Compute rectification maps (for reference, but not recommended for divergent cameras)
         map1_left, map2_left = cv2.initUndistortRectifyMap(
             camera_matrix_left, dist_coeffs_left, R1, P1,
             (left_gray.shape[1], left_gray.shape[0]), cv2.CV_32FC1)
@@ -940,10 +1102,22 @@ class Calibration:
             (left_gray.shape[1], left_gray.shape[0])
         )
         
-        # Compute overlap from actual marker detections (most accurate)
-        print("Computing overlap masks from detected markers...")
+        # Compute overlap from actual marker detections in matched stereo pairs (most accurate)
+        print("Computing overlap masks from detected markers in matched stereo pairs...")
+        # Build matched IDs for overlap computation
+        matched_ids_left = []
+        matched_ids_right = []
+        for i in range(min(len(allCorners['left']), len(allCorners['right']))):
+            common_ids = np.intersect1d(allIds['left'][i], allIds['right'][i])
+            if len(common_ids) > 0:
+                indices_left = np.isin(allIds['left'][i], common_ids).flatten()
+                indices_right = np.isin(allIds['right'][i], common_ids).flatten()
+                matched_ids_left.append(allIds['left'][i][indices_left])
+                matched_ids_right.append(allIds['right'][i][indices_right])
+        
         overlap_mask_left_markers, overlap_mask_right_markers, overlap_info_markers = self.compute_overlap_from_markers(
-            allCorners, allIds,
+            {'left': matched_corners_left, 'right': matched_corners_right},
+            {'left': matched_ids_left, 'right': matched_ids_right},
             (left_gray.shape[1], left_gray.shape[0])
         )
         
@@ -965,24 +1139,9 @@ class Calibration:
         print(f"  Overlap region: {overlap_info_markers['overlap_width']}x{overlap_info_markers['overlap_height']} pixels")
         print(f"  Common markers detected: {overlap_info_markers['common_markers']}/{overlap_info_markers['total_markers']}")
         
-        # Add rectification data (but not the large rectification maps)
-        data['R1'] = R1
-        data['R2'] = R2
-        data['P1'] = P1
-        data['P2'] = P2
-        data['Q'] = Q
-        data['roi_left'] = roi_left
-        data['roi_right'] = roi_right
-        # Note: map1_left, map2_left, map1_right, map2_right not saved (can be regenerated from R1, R2, P1, P2)
-        data['overlap_mask_left'] = overlap_mask_left
-        data['overlap_mask_right'] = overlap_mask_right
-        data['overlap_mask_left_rect'] = overlap_mask_left_rect
-        data['overlap_mask_right_rect'] = overlap_mask_right_rect
-        data['overlap_mask_left_markers'] = overlap_mask_left_markers
-        data['overlap_mask_right_markers'] = overlap_mask_right_markers
-        data['overlap_info'] = overlap_info
-        data['overlap_info_rect'] = overlap_info_rect
-        data['overlap_info_markers'] = overlap_info_markers
+        # Save only raw calibration data (R, T, E, F)
+        # Computed data (rectification, undistortion maps, overlap masks) can be regenerated when needed
+        # Note: R1, R2, P1, P2, Q, new_camera_matrix, and overlap masks not saved - compute on-demand
         
         self.save_calibration("stereo_calibration", data, save_format)
         
@@ -999,43 +1158,186 @@ class Calibration:
         print(f"  Recommended: Use overlap_mask_*_markers.png (based on actual detections)")
         
         # Create example rectified image pair from first stereo pair
-        if len(left_images) > 0 and len(right_images) > 0:
-            print("\nCreating example rectified images from first stereo pair...")
+        generate_debug = hasattr(self, 'generate_debug_images') and self.generate_debug_images
+        if generate_debug and len(left_images) > 0 and len(right_images) > 0:
+            print("\nCreating example undistorted images (recommended for divergent cameras)...")
             first_left = cv2.imread(left_images[0])
             first_right = cv2.imread(right_images[0])
             
             if first_left is not None and first_right is not None:
-                # Rectify the images
-                left_rectified = cv2.remap(first_left, map1_left, map2_left, cv2.INTER_LINEAR)
-                right_rectified = cv2.remap(first_right, map1_right, map2_right, cv2.INTER_LINEAR)
+                # Compute undistortion maps (not saved to reduce file size)
+                map1_left_undist, map2_left_undist = cv2.initUndistortRectifyMap(
+                    camera_matrix_left, dist_coeffs_left, None, new_camera_matrix_left, 
+                    (first_left.shape[1], first_left.shape[0]), cv2.CV_32FC1
+                )
+                map1_right_undist, map2_right_undist = cv2.initUndistortRectifyMap(
+                    camera_matrix_right, dist_coeffs_right, None, new_camera_matrix_right, 
+                    (first_right.shape[1], first_right.shape[0]), cv2.CV_32FC1
+                )
                 
-                # Save rectified images
-                cv2.imwrite(os.path.join(overlap_folder, 'example_left_rectified.png'), left_rectified)
-                cv2.imwrite(os.path.join(overlap_folder, 'example_right_rectified.png'), right_rectified)
+                # Apply undistortion
+                left_undistorted = cv2.remap(first_left, map1_left_undist, map2_left_undist, cv2.INTER_LINEAR)
+                right_undistorted = cv2.remap(first_right, map1_right_undist, map2_right_undist, cv2.INTER_LINEAR)
+                
+                # Draw valid ROI on undistorted images
+                left_undist_roi = left_undistorted.copy()
+                right_undist_roi = right_undistorted.copy()
+                x, y, w, h = roi_left_undist
+                if w > 0 and h > 0:
+                    cv2.rectangle(left_undist_roi, (x, y), (x+w, y+h), (0, 255, 0), 2)
+                x, y, w, h = roi_right_undist
+                if w > 0 and h > 0:
+                    cv2.rectangle(right_undist_roi, (x, y), (x+w, y+h), (0, 255, 0), 2)
+                
+                # Save undistorted images
+                cv2.imwrite(os.path.join(overlap_folder, 'example_left_undistorted.png'), left_undistorted)
+                cv2.imwrite(os.path.join(overlap_folder, 'example_right_undistorted.png'), right_undistorted)
+                
+                # Create comparison images with different alpha values
+                print("Creating alpha comparison images...")
+                alpha_values = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+                alpha_comparison_rows = []
+                
+                for alpha_val in alpha_values:
+                    # Compute new camera matrices with this alpha
+                    new_K_left, roi_l = cv2.getOptimalNewCameraMatrix(
+                        camera_matrix_left, dist_coeffs_left,
+                        (first_left.shape[1], first_left.shape[0]), alpha_val
+                    )
+                    new_K_right, roi_r = cv2.getOptimalNewCameraMatrix(
+                        camera_matrix_right, dist_coeffs_right,
+                        (first_right.shape[1], first_right.shape[0]), alpha_val
+                    )
+                    
+                    # Create undistortion maps
+                    m1_l, m2_l = cv2.initUndistortRectifyMap(
+                        camera_matrix_left, dist_coeffs_left, None, new_K_left,
+                        (first_left.shape[1], first_left.shape[0]), cv2.CV_32FC1
+                    )
+                    m1_r, m2_r = cv2.initUndistortRectifyMap(
+                        camera_matrix_right, dist_coeffs_right, None, new_K_right,
+                        (first_right.shape[1], first_right.shape[0]), cv2.CV_32FC1
+                    )
+                    
+                    # Apply undistortion
+                    left_undist = cv2.remap(first_left, m1_l, m2_l, cv2.INTER_LINEAR)
+                    right_undist = cv2.remap(first_right, m1_r, m2_r, cv2.INTER_LINEAR)
+                    
+                    # Draw ROI boxes
+                    left_with_roi = left_undist.copy()
+                    right_with_roi = right_undist.copy()
+                    x, y, w, h = roi_l
+                    if w > 0 and h > 0:
+                        cv2.rectangle(left_with_roi, (x, y), (x+w, y+h), (0, 255, 0), 2)
+                    x, y, w, h = roi_r
+                    if w > 0 and h > 0:
+                        cv2.rectangle(right_with_roi, (x, y), (x+w, y+h), (0, 255, 0), 2)
+                    
+                    # Create side-by-side pair with label
+                    pair = np.hstack([left_with_roi, right_with_roi])
+                    font = cv2.FONT_HERSHEY_SIMPLEX
+                    cv2.putText(pair, f'alpha = {alpha_val:.2f}', (20, 40), font, 1.2, (255, 255, 255), 2)
+                    alpha_comparison_rows.append(pair)
+                
+                # Stack all alpha comparisons vertically
+                alpha_comparison = np.vstack(alpha_comparison_rows)
+                cv2.imwrite(os.path.join(overlap_folder, 'alpha_comparison.png'), alpha_comparison)
+                print(f"Saved alpha comparison to {overlap_folder}/alpha_comparison.png")
+                print(f"  Alpha values: {alpha_values}")
+                print(f"  Recommendation: Use alpha=0.0 for clean images, or 0.25-0.5 for balance")
+                
+                # Create individual alpha comparison for left camera only
+                print("Creating left camera alpha comparison...")
+                left_alpha_rows = []
+                for alpha_val in alpha_values:
+                    new_K_left, roi_l = cv2.getOptimalNewCameraMatrix(
+                        camera_matrix_left, dist_coeffs_left,
+                        (first_left.shape[1], first_left.shape[0]), alpha_val
+                    )
+                    m1_l, m2_l = cv2.initUndistortRectifyMap(
+                        camera_matrix_left, dist_coeffs_left, None, new_K_left,
+                        (first_left.shape[1], first_left.shape[0]), cv2.CV_32FC1
+                    )
+                    left_undist = cv2.remap(first_left, m1_l, m2_l, cv2.INTER_LINEAR)
+                    left_with_roi = left_undist.copy()
+                    x, y, w, h = roi_l
+                    if w > 0 and h > 0:
+                        cv2.rectangle(left_with_roi, (x, y), (x+w, y+h), (0, 255, 0), 2)
+                    font = cv2.FONT_HERSHEY_SIMPLEX
+                    cv2.putText(left_with_roi, f'Left alpha = {alpha_val:.2f}', (20, 40), font, 1.2, (255, 255, 255), 2)
+                    left_alpha_rows.append(left_with_roi)
+                
+                left_alpha_comparison = np.vstack(left_alpha_rows)
+                cv2.imwrite(os.path.join(overlap_folder, 'alpha_comparison_left.png'), left_alpha_comparison)
+                print(f"Saved left camera alpha comparison to {overlap_folder}/alpha_comparison_left.png")
+                
+                # Create individual alpha comparison for right camera only
+                print("Creating right camera alpha comparison...")
+                right_alpha_rows = []
+                for alpha_val in alpha_values:
+                    new_K_right, roi_r = cv2.getOptimalNewCameraMatrix(
+                        camera_matrix_right, dist_coeffs_right,
+                        (first_right.shape[1], first_right.shape[0]), alpha_val
+                    )
+                    m1_r, m2_r = cv2.initUndistortRectifyMap(
+                        camera_matrix_right, dist_coeffs_right, None, new_K_right,
+                        (first_right.shape[1], first_right.shape[0]), cv2.CV_32FC1
+                    )
+                    right_undist = cv2.remap(first_right, m1_r, m2_r, cv2.INTER_LINEAR)
+                    right_with_roi = right_undist.copy()
+                    x, y, w, h = roi_r
+                    if w > 0 and h > 0:
+                        cv2.rectangle(right_with_roi, (x, y), (x+w, y+h), (0, 255, 0), 2)
+                    font = cv2.FONT_HERSHEY_SIMPLEX
+                    cv2.putText(right_with_roi, f'Right alpha = {alpha_val:.2f}', (20, 40), font, 1.2, (255, 255, 255), 2)
+                    right_alpha_rows.append(right_with_roi)
+                
+                right_alpha_comparison = np.vstack(right_alpha_rows)
+                cv2.imwrite(os.path.join(overlap_folder, 'alpha_comparison_right.png'), right_alpha_comparison)
+                print(f"Saved right camera alpha comparison to {overlap_folder}/alpha_comparison_right.png")
+                
+                # Create overlays with marker-based overlap masks on ORIGINAL images
+                first_left_overlay = first_left.copy()
+                first_right_overlay = first_right.copy()
+                
+                # Apply semi-transparent green to overlap regions
+                alpha = 0.3
+                green = np.zeros_like(first_left_overlay)
+                green[:] = (0, 255, 0)
+                
+                mask_left_3ch = cv2.cvtColor(overlap_mask_left_markers, cv2.COLOR_GRAY2BGR)
+                mask_right_3ch = cv2.cvtColor(overlap_mask_right_markers, cv2.COLOR_GRAY2BGR)
+                
+                first_left_overlay = np.where(mask_left_3ch > 0, 
+                                               cv2.addWeighted(first_left_overlay, 1 - alpha, green, alpha, 0),
+                                               first_left_overlay)
+                first_right_overlay = np.where(mask_right_3ch > 0,
+                                                cv2.addWeighted(first_right_overlay, 1 - alpha, green, alpha, 0),
+                                                first_right_overlay)
                 
                 # Create side-by-side comparison
                 original_pair = np.hstack([first_left, first_right])
-                rectified_pair = np.hstack([left_rectified, right_rectified])
+                original_pair_overlay = np.hstack([first_left_overlay, first_right_overlay])
+                undistorted_pair = np.hstack([left_undist_roi, right_undist_roi])
                 
-                # Draw horizontal lines on rectified pair to show epipolar alignment
-                rectified_with_lines = rectified_pair.copy()
-                for y in range(0, rectified_pair.shape[0], rectified_pair.shape[0] // 10):
-                    cv2.line(rectified_with_lines, (0, y), (rectified_pair.shape[1], y), (0, 255, 0), 1)
-                
-                # Stack original and rectified vertically
-                comparison = np.vstack([original_pair, rectified_with_lines])
+                # Stack original (with overlay) and undistorted vertically
+                comparison = np.vstack([original_pair_overlay, undistorted_pair])
                 
                 # Add labels
                 font = cv2.FONT_HERSHEY_SIMPLEX
-                cv2.putText(comparison, 'Original Images', (20, 40), font, 1.2, (255, 255, 255), 2)
-                cv2.putText(comparison, 'Rectified Images (green lines = epipolar lines)', 
+                cv2.putText(comparison, 'Original Images with Overlap (green)', (20, 40), font, 1.2, (255, 255, 255), 2)
+                cv2.putText(comparison, 'Undistorted Images (green box = valid ROI)', 
                            (20, first_left.shape[0] + 40), font, 1.2, (255, 255, 255), 2)
                 
-                cv2.imwrite(os.path.join(overlap_folder, 'rectification_comparison.png'), comparison)
-                print(f"Saved example rectified images to {overlap_folder}/")
-                print(f"  - example_left_rectified.png")
-                print(f"  - example_right_rectified.png")
-                print(f"  - rectification_comparison.png (shows before/after with epipolar lines)")
+                cv2.imwrite(os.path.join(overlap_folder, 'undistortion_comparison.png'), comparison)
+                print(f"Saved example undistorted images to {overlap_folder}/")
+                print(f"  - example_left_undistorted.png")
+                print(f"  - example_right_undistorted.png")
+                print(f"  - undistortion_comparison.png (shows overlap regions and valid ROI)")
+                print(f"\nNote: For divergent cameras, individual undistortion is recommended.")
+                print(f"      Stereo rectification (alignment) is NOT suitable for divergent cameras.")
+        elif not generate_debug:
+            print("\nDebug images disabled (set generate_debug_images=true in config to enable)")
         
         print("Stereo Calibration complete")
     
@@ -1246,14 +1548,14 @@ class Calibration:
         return overlap_mask_left, overlap_mask_right, overlap_info
     
     
-    def compute_overlap_from_markers(self, allCorners, allIds, image_size):
+    def compute_overlap_from_markers(self, matchedCorners, matchedIds, image_size):
         """
-        Compute overlap masks based on actual detected markers in stereo pairs.
-        This is the most accurate method as it uses real detections from calibration.
+        Compute overlap masks based on actual detected markers in MATCHED stereo pairs.
+        This is the most accurate method as it uses only the calibration pairs with common markers.
         
         Args:
-            allCorners: Dictionary with 'left' and 'right' lists of detected corners
-            allIds: Dictionary with 'left' and 'right' lists of detected marker IDs
+            matchedCorners: Dictionary with 'left' and 'right' lists of matched corners (only pairs with common markers)
+            matchedIds: Dictionary with 'left' and 'right' lists of matched marker IDs
             image_size: (width, height) of images
             
         Returns:
@@ -1263,39 +1565,30 @@ class Calibration:
         """
         width, height = image_size
         
-        # Collect all marker corner positions that were detected in BOTH cameras
+        # Collect all marker corner positions from matched stereo pairs
         left_points = []
         right_points = []
         common_marker_count = 0
         total_left_markers = set()
         total_right_markers = set()
-        pairs_processed = 0
+        pairs_processed = len(matchedCorners['left'])
         
-        # Iterate through all stereo pairs
-        for i in range(min(len(allCorners['left']), len(allCorners['right']))):
-            left_ids = allIds['left'][i].flatten() if allIds['left'][i] is not None else []
-            right_ids = allIds['right'][i].flatten() if allIds['right'][i] is not None else []
+        # Iterate through matched stereo pairs only
+        for i in range(len(matchedCorners['left'])):
+            left_ids = matchedIds['left'][i].flatten() if matchedIds['left'][i] is not None else []
+            right_ids = matchedIds['right'][i].flatten() if matchedIds['right'][i] is not None else []
             
             total_left_markers.update(left_ids)
             total_right_markers.update(right_ids)
             
-            # Find markers visible in both cameras
-            common_ids = np.intersect1d(left_ids, right_ids)
+            common_marker_count = max(common_marker_count, len(left_ids))  # These are already matched
             
-            if len(common_ids) > 0:
-                pairs_processed += 1
-                common_marker_count = max(common_marker_count, len(common_ids))
-                
-                # Get indices of common markers
-                indices_left = np.isin(left_ids, common_ids)
-                indices_right = np.isin(right_ids, common_ids)
-                
-                # Extract corner positions for common markers
-                left_corners = allCorners['left'][i][indices_left].reshape(-1, 2)
-                right_corners = allCorners['right'][i][indices_right].reshape(-1, 2)
-                
-                left_points.extend(left_corners)
-                right_points.extend(right_corners)
+            # Extract corner positions (already matched)
+            left_corners = matchedCorners['left'][i].reshape(-1, 2)
+            right_corners = matchedCorners['right'][i].reshape(-1, 2)
+            
+            left_points.extend(left_corners)
+            right_points.extend(right_corners)
         
         print(f"  Processed {pairs_processed} stereo pairs with common markers")
         print(f"  Collected {len(left_points)} corner points from left camera")
